@@ -36,6 +36,8 @@ jobs:
   build-and-test:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      ADMIN_API_KEY: dev-secret-key
     steps:
       - uses: actions/checkout@v4
 
