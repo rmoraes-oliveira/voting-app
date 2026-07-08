@@ -1,0 +1,108 @@
+{
+  "title": "Logs - Voting API",
+  "uid": "logs-voting-api",
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Contagem de logs por nível",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({container=\"api\"} | json | severity=\"ERROR\" [1m]))",
+          "refId": "A",
+          "legendFormat": "ERROR"
+        },
+        {
+          "expr": "sum(count_over_time({container=\"api\"} | json | severity=\"WARN\" [1m]))",
+          "refId": "B",
+          "legendFormat": "WARN"
+        },
+        {
+          "expr": "sum(count_over_time({container=\"api\"} | json | severity=\"INFO\" [1m]))",
+          "refId": "C",
+          "legendFormat": "INFO"
+        },
+        {
+          "expr": "sum(count_over_time({container=\"api\"} | json | severity=\"DEBUG\" [1m]))",
+          "refId": "D",
+          "legendFormat": "DEBUG"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Erros e Warnings",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "{container=\"api\"} |~ \"WARN|ERROR\"",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Logs em tempo real (todos os níveis)",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "{container=\"api\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Mensagens enviadas para a DLQ (votes_dlq)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({container=\"consumer\"} |~ \"dlq_dispatch\" [1m]))",
+          "refId": "A",
+          "legendFormat": "dispatched to DLQ"
+        }
+      ],
+      "alert": {
+        "name": "DLQ com mensagens",
+        "condition": "A",
+        "frequency": "1m",
+        "for": "1m",
+        "message": "Mensagens estão sendo enviadas para votes_dlq — verificar erros de infra no consumer.",
+        "conditions": [
+          {
+            "evaluator": { "type": "gt", "params": [0] },
+            "operator": { "type": "and" },
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "sum" }
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "title": "Mensagens na DLQ (detalhe)",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "{container=\"consumer\"} |~ \"dlq_dispatch\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
