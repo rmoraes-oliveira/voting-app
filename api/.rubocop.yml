@@ -1,0 +1,87 @@
+plugins:
+  - rubocop-performance
+  - rubocop-rspec
+
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'coverage/**/*'
+    - 'tmp/**/*'
+
+Style/Documentation:
+  Enabled: false
+
+Naming/VariableNumber:
+  Exclude:
+    - 'spec/**/*'
+
+Lint/ConstantDefinitionInBlock:
+  Exclude:
+    - 'spec/**/*'
+
+Layout/LineLength:
+  Exclude:
+    - 'spec/**/*'
+
+RSpec/ExampleLength:
+  Enabled: false
+
+RSpec/NestedGroups:
+  Enabled: false
+
+RSpec/IndexedLet:
+  Enabled: false
+
+RSpec/SubjectStub:
+  Enabled: false
+
+RSpec/RemoveConst:
+  Enabled: false
+
+RSpec/MultipleMemoizedHelpers:
+  Enabled: false
+
+RSpec/DescribeClass:
+  Exclude:
+    - 'spec/config/metrics_spec.rb'
+    - 'spec/requests/**/*'
+
+Metrics/BlockLength:
+  Exclude:
+    - 'spec/**/*'
+    - 'app.rb'
+    - 'admin_app.rb'
+
+Metrics/ClassLength:
+  Exclude:
+    - 'app.rb'
+    - 'admin_app.rb'
+
+Metrics/AbcSize:
+  Exclude:
+    - 'vote_validator.rb'
+    - 'config/kafka_lag.rb'
+    - 'config/vote_reconciler.rb'
+    - 'consumers/votes_consumer.rb'
+
+Metrics/CyclomaticComplexity:
+  Exclude:
+    - 'vote_validator.rb'
+    - 'config/kafka_lag.rb'
+    - 'config/vote_reconciler.rb'
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - 'vote_validator.rb'
+    - 'config/kafka_lag.rb'
+    - 'config/vote_reconciler.rb'
+
+Metrics/MethodLength:
+  Exclude:
+    - 'vote_validator.rb'
+    - 'config/kafka_lag.rb'
+    - 'config/vote_reconciler.rb'
+    - 'consumers/votes_consumer.rb'
+    - 'config/settings.rb'
