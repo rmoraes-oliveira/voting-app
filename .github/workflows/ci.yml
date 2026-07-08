@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends librdkafka-dev
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: api
+
+      - name: Run rubocop
+        run: bundle exec rubocop
+
+      - name: Run rspec
+        run: bundle exec rspec
+
+  build-and-test:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start stack
+        env:
+          SKIP_PROOF_OF_WORK: "true"
+        run: docker compose up -d --wait --wait-timeout 120
+
+      - name: Check service health
+        run: docker compose ps
+
+      - name: Smoke test - create poll and vote
+        run: |
+          curl -sf -X POST http://localhost:9292/admin/poll/start \
+            -H "X-Api-Key: dev-secret-key" \
+            -H "Content-Type: application/json" \
+            -d '{"candidates":[{"id":"a","name":"Alice"},{"id":"b","name":"Bob"}]}'
+
+          curl -sf -X POST http://localhost:9292/votes \
+            -H "Content-Type: application/json" \
+            -d '{"candidate_id":"a"}'
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
