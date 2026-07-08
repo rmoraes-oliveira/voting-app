@@ -1,0 +1,25 @@
+# frozen_string_literal: true
+
+source 'https://rubygems.org'
+
+gem 'cgi'
+gem 'falcon'
+gem 'json'
+gem 'karafka'
+gem 'prometheus-client'
+gem 'redis'
+gem 'sinatra'
+
+group :development do
+  gem 'rubocop', require: false
+  gem 'rubocop-performance', require: false
+  gem 'rubocop-rspec', require: false
+end
+
+group :test do
+  gem 'mock_redis'
+  gem 'pry'
+  gem 'rack-test'
+  gem 'rspec'
+  gem 'simplecov', require: false
+end

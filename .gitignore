@@ -1,0 +1,7 @@
+.env
+api/.env
+api/vendor/
+api/.bundle/
+api/coverage/
+api/tmp/
+api/log/
