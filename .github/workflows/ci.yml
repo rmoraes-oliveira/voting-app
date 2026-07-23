@@ -54,14 +54,14 @@ jobs:
 
       - name: Smoke test - create poll and vote
         run: |
-          curl -sf -X POST http://localhost:9292/admin/poll/start \
+          POLL_ID=$(curl -sf -X POST http://localhost:9292/admin/poll/start \
             -H "X-Api-Key: dev-secret-key" \
             -H "Content-Type: application/json" \
-            -d '{"candidates":[{"id":"a","name":"Alice"},{"id":"b","name":"Bob"}]}'
+            -d '{"candidates":[{"id":"a","name":"Alice"},{"id":"b","name":"Bob"}]}' | jq -r '.poll_id')
 
           curl -sf -X POST http://localhost:9292/votes \
             -H "Content-Type: application/json" \
-            -d '{"candidate_id":"a"}'
+            -d "{\"candidate_id\":\"a\",\"poll_id\":\"$POLL_ID\"}"
 
       - name: Dump logs on failure
         if: failure()
