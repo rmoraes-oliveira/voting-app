@@ -1,0 +1,154 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-07-22T00:00:00.000Z",
+  "__export_source": "insomnia.desktop.app:v2023.5.8",
+  "resources": [
+    {
+      "_id": "wrk_laager",
+      "_type": "workspace",
+      "parentId": null,
+      "name": "Laager Desafio - Votação",
+      "description": "API de votação (VotingAPI) e API administrativa (AdminAPI)",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_laager",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:9292",
+        "admin_api_key": "changeme",
+        "poll_id": "loadtest-1",
+        "candidate_id": "1"
+      }
+    },
+
+    {
+      "_id": "fld_public",
+      "_type": "request_group",
+      "parentId": "wrk_laager",
+      "name": "Public API"
+    },
+    {
+      "_id": "req_health",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "Health Check",
+      "method": "GET",
+      "url": "{{ _.base_url }}/health"
+    },
+    {
+      "_id": "req_polls",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "List Active Polls",
+      "method": "GET",
+      "url": "{{ _.base_url }}/polls"
+    },
+    {
+      "_id": "req_poll",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "Get Poll by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/poll/{{ _.poll_id }}"
+    },
+    {
+      "_id": "req_challenge",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "Get Vote Challenge",
+      "method": "GET",
+      "url": "{{ _.base_url }}/votes/challenge"
+    },
+    {
+      "_id": "req_vote",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "Cast Vote",
+      "method": "POST",
+      "url": "{{ _.base_url }}/votes",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"candidate_id\": \"{{ _.candidate_id }}\",\n  \"poll_id\": \"{{ _.poll_id }}\",\n  \"challenge_token\": \"\",\n  \"nonce\": \"\"\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ]
+    },
+    {
+      "_id": "req_summary",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "Votes Summary",
+      "method": "GET",
+      "url": "{{ _.base_url }}/votes/summary/{{ _.poll_id }}"
+    },
+    {
+      "_id": "req_metrics",
+      "_type": "request",
+      "parentId": "fld_public",
+      "name": "Metrics (Prometheus)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/metrics"
+    },
+
+    {
+      "_id": "fld_admin",
+      "_type": "request_group",
+      "parentId": "wrk_laager",
+      "name": "Admin API"
+    },
+    {
+      "_id": "req_poll_start",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Start Poll",
+      "method": "POST",
+      "url": "{{ _.base_url }}/admin/poll/start",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"poll_id\": \"{{ _.poll_id }}\",\n  \"candidates\": [\n    { \"id\": \"1\", \"name\": \"Candidato 1\" },\n    { \"id\": \"2\", \"name\": \"Candidato 2\" }\n  ]\n}"
+      },
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "X-API-Key", "value": "{{ _.admin_api_key }}" }
+      ]
+    },
+    {
+      "_id": "req_poll_stop",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Stop Poll",
+      "method": "POST",
+      "url": "{{ _.base_url }}/admin/poll/stop/{{ _.poll_id }}",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ _.admin_api_key }}" }
+      ]
+    },
+    {
+      "_id": "req_poll_results_by_id",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Get Poll Results by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/admin/poll/results/{{ _.poll_id }}",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ _.admin_api_key }}" }
+      ]
+    },
+    {
+      "_id": "req_poll_results",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Get Poll Results History",
+      "method": "GET",
+      "url": "{{ _.base_url }}/admin/poll/results",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ _.admin_api_key }}" }
+      ]
+    }
+  ]
+}
