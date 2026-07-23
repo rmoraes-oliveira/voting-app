@@ -28,7 +28,8 @@ else
   polls_with_missing_counters = active_poll_ids.select { |poll_id| counters_missing?(redis, poll_id) }
 
   if polls_with_missing_counters.any? && redis.set('boot:reconcile:lock', '1', nx: true, ex: 60)
-    warn "[boot] Polls configurados mas contadores ausentes (#{polls_with_missing_counters.join(', ')}) — reconstruindo a partir do Kafka..."
+    missing = polls_with_missing_counters.join(', ')
+    warn "[boot] Polls configurados mas contadores ausentes (#{missing}) — reconstruindo a partir do Kafka..."
     polls_with_missing_counters.each { |poll_id| VoteReconciler.rebuild_from_kafka!(redis, poll_id) }
     warn '[boot] Reconciliação concluída.'
   end
