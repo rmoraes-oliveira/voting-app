@@ -6,11 +6,11 @@ require_relative 'redis_keys'
 # Reconstrói os contadores de votos lendo o histórico do tópico Kafka,
 # somando ao que já existe (usa a mesma chave de dedup do VotesConsumer).
 module VoteReconciler
-  def self.rebuild_from_kafka!(redis)
-    candidate_ids = redis.smembers(RedisKeys.poll_current_candidates)
+  def self.rebuild_from_kafka!(redis, poll_id)
+    candidate_ids = redis.smembers(RedisKeys.poll_current_candidates(poll_id))
     return {} if candidate_ids.empty?
 
-    current_poll_id = redis.get(RedisKeys.poll_current_poll_id)
+    current_poll_id = redis.get(RedisKeys.poll_current_poll_id(poll_id))
 
     config = {
       'bootstrap.servers' => Settings::KAFKA_BROKERS,

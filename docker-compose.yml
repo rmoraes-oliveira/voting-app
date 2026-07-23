@@ -84,6 +84,7 @@ services:
         condition: service_healthy
     command: ["bundle", "exec", "falcon", "serve", "--bind", "http://0.0.0.0:9292", "--count", "8"]
     volumes:
+      - ./api:/app
       - api-logs:/app/log
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9292/health"]
@@ -112,6 +113,8 @@ services:
         condition: service_healthy
     command: ["bundle", "exec", "karafka", "server"]
     stop_grace_period: 65s
+    volumes:
+      - ./api:/app
     networks:
       - voting-net
 
@@ -124,6 +127,8 @@ services:
     container_name: frontend
     ports:
       - "8080:80"
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html
     depends_on:
       - api
     networks:

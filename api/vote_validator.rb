@@ -10,7 +10,7 @@ class VoteValidator
     @redis = redis
   end
 
-  def call(candidate_id:, challenge_token:, nonce:)
+  def call(candidate_id:, challenge_token:, nonce:, poll_id:)
     return Result.new(false, 400, 'Candidate_id is required') unless candidate_id
 
     # só ignora PoW fora de produção
@@ -21,10 +21,9 @@ class VoteValidator
     return Result.new(false, 400, 'Invalid or expired challenge') unless valid_proof_of_work?(challenge_token, nonce,
                                                                                               skip_pow)
 
-    status_value, candidate_is_member, poll_id = @redis.pipelined do |pipeline|
-      pipeline.get(RedisKeys.poll_current_status)
-      pipeline.sismember(RedisKeys.poll_current_candidates, candidate_id)
-      pipeline.get(RedisKeys.poll_current_poll_id)
+    status_value, candidate_is_member = @redis.pipelined do |pipeline|
+      pipeline.get(RedisKeys.poll_current_status(poll_id))
+      pipeline.sismember(RedisKeys.poll_current_candidates(poll_id), candidate_id)
     end
 
     return Result.new(false, 403, 'Poll is not active') unless status_value == 'active'

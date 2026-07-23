@@ -12,9 +12,20 @@
   <body>
     <div class="container" style="max-width: 480px; margin-top: 40px;">
       <h1 class="h4 mb-4">Vote no seu candidato</h1>
-      <div id="candidates" class="d-grid gap-2 mb-3"></div>
+
+      <div id="poll-picker">
+        <h2 class="h6 mb-3">Escolha uma votação ativa</h2>
+        <div id="poll-list" class="d-grid gap-2 mb-3"></div>
+      </div>
+
+      <div id="poll-voting" class="d-none">
+        <button id="back-to-polls" type="button" class="btn btn-link p-0 mb-3">&larr; Escolher outra votação</button>
+        <h2 id="poll-title" class="h6 mb-3"></h2>
+        <div id="candidates" class="d-grid gap-2 mb-3"></div>
+        <div id="results"></div>
+      </div>
+
       <div id="status" class="alert d-none" role="alert"></div>
-      <div id="results"></div>
     </div>
 
     <script>
@@ -45,17 +56,57 @@
         el.className = `alert ${ALERT_CLASS[kind]}`;
       }
 
+      function clearStatus() {
+        const el = document.getElementById('status');
+        el.className = 'alert d-none';
+      }
+
       let currentPollId = null;
 
-      async function loadPoll() {
-        const res = await fetch(`${API_BASE}/poll`);
-        const data = await res.json();
-        currentPollId = data.poll_id;
+      async function loadActivePolls() {
+        const pickerEl = document.getElementById('poll-picker');
+        const votingEl = document.getElementById('poll-voting');
+        const listEl = document.getElementById('poll-list');
 
-        if (data.status_value !== 'active') {
+        votingEl.classList.add('d-none');
+        pickerEl.classList.remove('d-none');
+        listEl.innerHTML = '';
+        clearStatus();
+
+        const res = await fetch(`${API_BASE}/polls`);
+        const data = await res.json();
+
+        if (!data.polls || data.polls.length === 0) {
           setStatus('Nenhuma votação ativa no momento.', 'error');
           return;
         }
+
+        data.polls.forEach((poll) => {
+          const button = document.createElement('button');
+          button.className = 'btn btn-outline-primary btn-lg text-start';
+          const candidateNames = Object.values(poll.candidates).join(', ');
+          button.innerHTML = `<div>${poll.poll_id}</div><div class="small text-muted">${candidateNames}</div>`;
+          button.onclick = () => selectPoll(poll.poll_id);
+          listEl.appendChild(button);
+        });
+      }
+
+      async function selectPoll(pollId) {
+        currentPollId = pollId;
+
+        const res = await fetch(`${API_BASE}/poll/${pollId}`);
+        const data = await res.json();
+
+        if (data.status_value !== 'active') {
+          setStatus('Esta votação não está mais ativa.', 'error');
+          await loadActivePolls();
+          return;
+        }
+
+        document.getElementById('poll-picker').classList.add('d-none');
+        document.getElementById('poll-voting').classList.remove('d-none');
+        document.getElementById('poll-title').textContent = `Votação: ${pollId}`;
+        clearStatus();
 
         const container = document.getElementById('candidates');
         container.innerHTML = '';
@@ -113,7 +164,7 @@
       }
 
       async function vote(candidateId, button) {
-        document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+        document.querySelectorAll('#candidates button').forEach((b) => (b.disabled = true));
         setStatus('Confirmando que você não é um robô...', 'pending');
 
         try {
@@ -129,7 +180,12 @@
           const voteRes = await fetch(`${API_BASE}/votes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ candidate_id: candidateId, challenge_token: challenge, nonce: String(nonce) }),
+            body: JSON.stringify({
+              candidate_id: candidateId,
+              poll_id: currentPollId,
+              challenge_token: challenge,
+              nonce: String(nonce),
+            }),
           });
           const voteData = await voteRes.json();
 
@@ -143,11 +199,16 @@
         } catch (err) {
           setStatus('Erro de conexão com o servidor.', 'error');
         } finally {
-          document.querySelectorAll('button').forEach((b) => (b.disabled = false));
+          document.querySelectorAll('#candidates button').forEach((b) => (b.disabled = false));
         }
       }
 
-      loadPoll();
+      document.getElementById('back-to-polls').addEventListener('click', () => {
+        currentPollId = null;
+        loadActivePolls();
+      });
+
+      loadActivePolls();
     </script>
   </body>
 </html>

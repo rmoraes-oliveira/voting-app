@@ -22,15 +22,15 @@ RSpec.describe VoteReconciler do
 
     context 'when there is no active poll (no candidates registered)' do
       it 'returns an empty hash without touching Kafka', :aggregate_failures do
-        expect(described_class.rebuild_from_kafka!(redis)).to eq({})
+        expect(described_class.rebuild_from_kafka!(redis, poll_id)).to eq({})
         expect(Rdkafka::Config).not_to have_received(:new)
       end
     end
 
     context 'when there is an active poll' do
       before do
-        redis.set(RedisKeys.poll_current_poll_id, poll_id)
-        redis.sadd(RedisKeys.poll_current_candidates, %w[1 2])
+        redis.set(RedisKeys.poll_current_poll_id(poll_id), poll_id)
+        redis.sadd(RedisKeys.poll_current_candidates(poll_id), %w[1 2])
       end
 
       context 'with votes for the current poll' do
@@ -44,26 +44,26 @@ RSpec.describe VoteReconciler do
         end
 
         it 'sums vote deltas per candidate' do
-          deltas = described_class.rebuild_from_kafka!(redis)
+          deltas = described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(deltas).to eq('1' => 2, '2' => 1)
         end
 
         it 'persists the deltas into the vote totals', :aggregate_failures do
-          described_class.rebuild_from_kafka!(redis)
+          described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(redis.get(RedisKeys.votes_total(poll_id, '1')).to_i).to eq(2)
           expect(redis.get(RedisKeys.votes_total(poll_id, '2')).to_i).to eq(1)
         end
 
         it 'appends the recovered votes to the audit stream' do
-          described_class.rebuild_from_kafka!(redis)
+          described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(redis.xlen(RedisKeys.votes_audit)).to eq(3)
         end
 
         it 'closes the Kafka consumer' do
-          described_class.rebuild_from_kafka!(redis)
+          described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(kafka_consumer).to have_received(:close)
         end
@@ -78,7 +78,7 @@ RSpec.describe VoteReconciler do
         end
 
         it 'ignores them' do
-          deltas = described_class.rebuild_from_kafka!(redis)
+          deltas = described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(deltas).to eq({})
         end
@@ -93,7 +93,7 @@ RSpec.describe VoteReconciler do
         end
 
         it 'skips it' do
-          deltas = described_class.rebuild_from_kafka!(redis)
+          deltas = described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(deltas).to eq({})
         end
@@ -110,7 +110,7 @@ RSpec.describe VoteReconciler do
         end
 
         it 'does not double count it' do
-          deltas = described_class.rebuild_from_kafka!(redis)
+          deltas = described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(deltas).to eq({})
         end
@@ -127,7 +127,7 @@ RSpec.describe VoteReconciler do
         end
 
         it 'resets the empty-poll counter and keeps consuming' do
-          deltas = described_class.rebuild_from_kafka!(redis)
+          deltas = described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(deltas).to eq('1' => 2)
         end
@@ -139,7 +139,7 @@ RSpec.describe VoteReconciler do
         end
 
         it 'stops after 5 consecutive empty polls and returns no deltas', :aggregate_failures do
-          deltas = described_class.rebuild_from_kafka!(redis)
+          deltas = described_class.rebuild_from_kafka!(redis, poll_id)
 
           expect(deltas).to eq({})
           expect(kafka_consumer).to have_received(:poll).exactly(5).times

@@ -25,11 +25,12 @@ RSpec.describe 'Admin Request' do
         end
 
         it 'persists the poll data in Redis', :aggregate_failures do
-          expect(REDIS.get(RedisKeys.poll_current_status)).to eq('active')
-          expect(REDIS.get(RedisKeys.poll_current_poll_id)).to eq('42')
-          expect(REDIS.smembers(RedisKeys.poll_current_candidates)).to contain_exactly('1', '2')
-          expect(REDIS.hget(RedisKeys.poll_current_candidate_names, 1)).to eq('João')
-          expect(REDIS.hget(RedisKeys.poll_current_candidate_names, 2)).to eq('Maria')
+          expect(REDIS.get(RedisKeys.poll_current_status(42))).to eq('active')
+          expect(REDIS.get(RedisKeys.poll_current_poll_id(42))).to eq('42')
+          expect(REDIS.smembers(RedisKeys.poll_current_candidates(42))).to contain_exactly('1', '2')
+          expect(REDIS.hget(RedisKeys.poll_current_candidate_names(42), 1)).to eq('João')
+          expect(REDIS.hget(RedisKeys.poll_current_candidate_names(42), 2)).to eq('Maria')
+          expect(REDIS.smembers(RedisKeys.polls_active)).to include('42')
         end
       end
 
@@ -50,7 +51,7 @@ RSpec.describe 'Admin Request' do
       let(:candidates) { [{ id: 1, name: 'João' }, { id: 2, name: 'Maria' }] }
 
       before do
-        REDIS.set(RedisKeys.poll_current_status, 'active')
+        REDIS.set(RedisKeys.poll_current_status(42), 'active')
         start_poll
       end
 
@@ -61,16 +62,39 @@ RSpec.describe 'Admin Request' do
         expect(response_body).to include('message' => 'Poll is already active')
       end
     end
+
+    context 'when a different poll_id is already active' do
+      let(:candidates) { [{ id: 1, name: 'João' }, { id: 2, name: 'Maria' }] }
+
+      before do
+        REDIS.set(RedisKeys.poll_current_status(99), 'active')
+        REDIS.sadd(RedisKeys.polls_active, '99')
+        start_poll
+      end
+
+      it 'allows starting a new poll with a different poll_id', :aggregate_failures do
+        expect(last_response.status).to eq(200)
+        expect(REDIS.smembers(RedisKeys.polls_active)).to contain_exactly('99', '42')
+      end
+    end
   end
 
-  describe 'POST /poll/stop' do
+  describe 'POST /poll/stop/:poll_id' do
+    let(:poll_id) { '42' }
+
     context 'when the poll is active' do
       before do
         allow(KafkaLag).to receive(:total_lag).and_return(0)
 
-        REDIS.set(RedisKeys.poll_current_status, 'active')
-        REDIS.set(RedisKeys.poll_current_poll_id, '42')
-        post '/poll/stop', {}.to_json,
+        REDIS.set(RedisKeys.poll_current_status(poll_id), 'active')
+        REDIS.set(RedisKeys.poll_current_poll_id(poll_id), poll_id)
+        REDIS.set(RedisKeys.poll_current_started_at(poll_id), 1000)
+        REDIS.sadd(RedisKeys.poll_current_candidates(poll_id), [1, 2])
+        REDIS.hset(RedisKeys.poll_current_candidate_names(poll_id), 1, 'João')
+        REDIS.hset(RedisKeys.poll_current_candidate_names(poll_id), 2, 'Maria')
+        REDIS.sadd(RedisKeys.polls_active, poll_id)
+
+        post "/poll/stop/#{poll_id}", {}.to_json,
              { 'CONTENT_TYPE' => 'application/json', 'HTTP_X_API_KEY' => ENV.fetch('ADMIN_API_KEY', nil) }
       end
 
@@ -82,15 +106,22 @@ RSpec.describe 'Admin Request' do
       end
 
       it 'updates the poll status in Redis', :aggregate_failures do
-        expect(REDIS.get(RedisKeys.poll_current_status)).to eq('stopped')
-        expect(REDIS.get(RedisKeys.poll_current_ended_at)).not_to be_nil
+        expect(REDIS.get(RedisKeys.poll_current_status(poll_id))).to eq('stopped')
+        expect(REDIS.get(RedisKeys.poll_current_ended_at(poll_id))).not_to be_nil
+        expect(REDIS.smembers(RedisKeys.polls_active)).not_to include(poll_id)
+      end
+
+      it 'stores a results snapshot indexed for GET /poll/results', :aggregate_failures do
+        snapshot = JSON.parse(REDIS.get(RedisKeys.poll_results(poll_id)))
+        expect(snapshot).to include('poll_id' => poll_id)
+        expect(REDIS.zscore(RedisKeys.poll_results_index, poll_id)).not_to be_nil
       end
     end
 
     context 'when the poll is not active' do
       before do
-        REDIS.set(RedisKeys.poll_current_status, 'stopped')
-        post '/poll/stop', {}.to_json,
+        REDIS.set(RedisKeys.poll_current_status(poll_id), 'stopped')
+        post "/poll/stop/#{poll_id}", {}.to_json,
              { 'CONTENT_TYPE' => 'application/json', 'HTTP_X_API_KEY' => ENV.fetch('ADMIN_API_KEY', nil) }
       end
 
@@ -106,9 +137,9 @@ RSpec.describe 'Admin Request' do
       before do
         allow(KafkaLag).to receive(:total_lag).and_return(10)
 
-        REDIS.set(RedisKeys.poll_current_status, 'active')
-        REDIS.set(RedisKeys.poll_current_poll_id, '42')
-        post '/poll/stop', {}.to_json,
+        REDIS.set(RedisKeys.poll_current_status(poll_id), 'active')
+        REDIS.set(RedisKeys.poll_current_poll_id(poll_id), poll_id)
+        post "/poll/stop/#{poll_id}", {}.to_json,
              { 'CONTENT_TYPE' => 'application/json', 'HTTP_X_API_KEY' => ENV.fetch('ADMIN_API_KEY', nil) }
       end
 

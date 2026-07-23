@@ -5,13 +5,16 @@ RSpec.describe 'App Request' do
     VotingAPI
   end
 
+  let(:poll_id) { '42' }
+
   before do
-    REDIS.set(RedisKeys.poll_current_status, 'active')
-    REDIS.set(RedisKeys.poll_current_poll_id, '42')
-    REDIS.set(RedisKeys.poll_current_started_at, Time.now.to_i)
-    REDIS.sadd(RedisKeys.poll_current_candidates, [1, 2, 3])
-    REDIS.hset(RedisKeys.poll_current_candidate_names, 1, 'João')
-    REDIS.hset(RedisKeys.poll_current_candidate_names, 2, 'Maria')
+    REDIS.set(RedisKeys.poll_current_status(poll_id), 'active')
+    REDIS.set(RedisKeys.poll_current_poll_id(poll_id), poll_id)
+    REDIS.set(RedisKeys.poll_current_started_at(poll_id), Time.now.to_i)
+    REDIS.sadd(RedisKeys.poll_current_candidates(poll_id), [1, 2, 3])
+    REDIS.hset(RedisKeys.poll_current_candidate_names(poll_id), 1, 'João')
+    REDIS.hset(RedisKeys.poll_current_candidate_names(poll_id), 2, 'Maria')
+    REDIS.sadd(RedisKeys.polls_active, poll_id)
   end
 
   describe 'POST /votes' do
@@ -36,7 +39,7 @@ RSpec.describe 'App Request' do
 
     context 'when the vote is valid' do
       before do
-        post '/votes', { candidate_id: 1 }.to_json, { 'CONTENT_TYPE' => 'application/json' }
+        post '/votes', { candidate_id: 1, poll_id: poll_id }.to_json, { 'CONTENT_TYPE' => 'application/json' }
       end
 
       it 'increments the vote count in Prometheus' do
@@ -54,7 +57,7 @@ RSpec.describe 'App Request' do
       context 'when the challenge token and nonce are provided' do
         before do
           REDIS.set(RedisKeys.challenge('valid_token'), 'some_value')
-          post '/votes', { candidate_id: 1, challenge_token: 'valid_token', nonce: '0000abc' }.to_json,
+          post '/votes', { candidate_id: 1, poll_id: poll_id, challenge_token: 'valid_token', nonce: '0000abc' }.to_json,
                { 'CONTENT_TYPE' => 'application/json' }
         end
 
@@ -69,7 +72,7 @@ RSpec.describe 'App Request' do
 
       before do
         allow(producer).to receive(:produce).and_raise(kafka_error)
-        post '/votes', { candidate_id: 1 }.to_json, { 'CONTENT_TYPE' => 'application/json' }
+        post '/votes', { candidate_id: 1, poll_id: poll_id }.to_json, { 'CONTENT_TYPE' => 'application/json' }
       end
 
       it 'returns a 503 error response', :aggregate_failures do
@@ -84,7 +87,7 @@ RSpec.describe 'App Request' do
 
       context 'when the candidate does not exist' do
         before do
-          post '/votes', { candidate_id: candidate_id }.to_json, { 'CONTENT_TYPE' => 'application/json' }
+          post '/votes', { candidate_id: candidate_id, poll_id: poll_id }.to_json, { 'CONTENT_TYPE' => 'application/json' }
         end
 
         it 'returns an error response', :aggregate_failures do
@@ -96,8 +99,8 @@ RSpec.describe 'App Request' do
 
       context 'when the poll is not active' do
         before do
-          REDIS.set(RedisKeys.poll_current_status, 'inactive')
-          post '/votes', { candidate_id: 1 }.to_json, { 'CONTENT_TYPE' => 'application/json' }
+          REDIS.set(RedisKeys.poll_current_status(poll_id), 'inactive')
+          post '/votes', { candidate_id: 1, poll_id: poll_id }.to_json, { 'CONTENT_TYPE' => 'application/json' }
         end
 
         it 'returns an error response', :aggregate_failures do
@@ -116,7 +119,7 @@ RSpec.describe 'App Request' do
 
         context 'when the challenge token is missing' do
           before do
-            post '/votes', { candidate_id: 1, nonce: 'some_nonce' }.to_json, { 'CONTENT_TYPE' => 'application/json' }
+            post '/votes', { candidate_id: 1, poll_id: poll_id, nonce: 'some_nonce' }.to_json, { 'CONTENT_TYPE' => 'application/json' }
           end
 
           it 'returns an error response', :aggregate_failures do
@@ -128,7 +131,7 @@ RSpec.describe 'App Request' do
 
         context 'when the nonce is missing' do
           before do
-            post '/votes', { candidate_id: 1, challenge_token: 'some_token' }.to_json,
+            post '/votes', { candidate_id: 1, poll_id: poll_id, challenge_token: 'some_token' }.to_json,
                  { 'CONTENT_TYPE' => 'application/json' }
           end
 
@@ -141,7 +144,7 @@ RSpec.describe 'App Request' do
 
         context 'when the challenge token does not exist in Redis' do
           before do
-            post '/votes', { candidate_id: 1, challenge_token: 'invalid_token', nonce: 'some_nonce' }.to_json,
+            post '/votes', { candidate_id: 1, poll_id: poll_id, challenge_token: 'invalid_token', nonce: 'some_nonce' }.to_json,
                  { 'CONTENT_TYPE' => 'application/json' }
           end
 
@@ -155,7 +158,7 @@ RSpec.describe 'App Request' do
         context 'when the proof of work hash does not meet the difficulty target' do
           before do
             REDIS.set(RedisKeys.challenge('valid_token'), 'some_value')
-            post '/votes', { candidate_id: 1, challenge_token: 'valid_token', nonce: 'wrong_nonce' }.to_json,
+            post '/votes', { candidate_id: 1, poll_id: poll_id, challenge_token: 'valid_token', nonce: 'wrong_nonce' }.to_json,
                  { 'CONTENT_TYPE' => 'application/json' }
           end
 
@@ -169,9 +172,9 @@ RSpec.describe 'App Request' do
     end
   end
 
-  describe 'GET /poll' do
+  describe 'GET /poll/:poll_id' do
     before do
-      get '/poll'
+      get "/poll/#{poll_id}"
     end
 
     it 'returns the current poll information', :aggregate_failures do
@@ -181,6 +184,30 @@ RSpec.describe 'App Request' do
       expect(response_body).to include('poll_id' => '42')
       expect(response_body).to include('status_value' => 'active')
       expect(response_body).to include('candidates' => { '1' => 'João', '2' => 'Maria', '3' => nil })
+    end
+  end
+
+  describe 'GET /poll/:poll_id when the poll does not exist' do
+    before do
+      get '/poll/does-not-exist'
+    end
+
+    it 'returns a 404' do
+      expect(last_response.status).to eq(404)
+    end
+  end
+
+  describe 'GET /polls' do
+    before do
+      get '/polls'
+    end
+
+    it 'returns the list of active polls', :aggregate_failures do
+      expect(last_response.status).to eq(200)
+      response_body = JSON.parse(last_response.body)
+      expect(response_body).to include('status' => 'success', 'count' => 1)
+      expect(response_body['polls'].first).to include('poll_id' => poll_id, 'status_value' => 'active')
+      expect(response_body['polls'].first['candidates']).to include('1' => 'João', '2' => 'Maria')
     end
   end
 
@@ -209,15 +236,10 @@ RSpec.describe 'App Request' do
   end
 
   describe 'GET /votes/summary/:poll_id' do
-    let(:poll_id) { '42' }
-
     before do
-      REDIS.set(RedisKeys.poll_current_status, 'active')
-      REDIS.set(RedisKeys.poll_current_poll_id, poll_id)
-      REDIS.set(RedisKeys.poll_current_started_at, Time.now.to_i)
-      REDIS.sadd(RedisKeys.poll_current_candidates, [1, 2])
-      REDIS.hset(RedisKeys.poll_current_candidate_names, 1, 'João')
-      REDIS.hset(RedisKeys.poll_current_candidate_names, 2, 'Maria')
+      REDIS.sadd(RedisKeys.poll_current_candidates(poll_id), [1, 2])
+      REDIS.hset(RedisKeys.poll_current_candidate_names(poll_id), 1, 'João')
+      REDIS.hset(RedisKeys.poll_current_candidate_names(poll_id), 2, 'Maria')
 
       100.times { REDIS.incr(RedisKeys.votes_total(poll_id, 1)) }
       50.times { REDIS.incr(RedisKeys.votes_total(poll_id, 2)) }
@@ -245,6 +267,16 @@ RSpec.describe 'App Request' do
         '1' => { 'name' => 'João', 'total_votes' => 100 },
         '2' => { 'name' => 'Maria', 'total_votes' => 50 }
       )
+    end
+  end
+
+  describe 'GET /votes/summary/:poll_id when the poll does not exist' do
+    before do
+      get '/votes/summary/does-not-exist'
+    end
+
+    it 'returns a 404' do
+      expect(last_response.status).to eq(404)
     end
   end
 

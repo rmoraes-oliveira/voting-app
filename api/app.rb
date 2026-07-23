@@ -29,12 +29,14 @@ class VotingAPI < Sinatra::Base
       settings.kafka_producer
     end
 
-    def poll_id
-      redis.get(RedisKeys.poll_current_poll_id)
-    end
-
     def vote_validator
       @vote_validator ||= VoteValidator.new(redis)
+    end
+
+    def poll_active_or_known?(poll_id)
+      redis.sismember(RedisKeys.polls_active, poll_id) ||
+        !redis.smembers(RedisKeys.poll_current_candidates(poll_id)).empty? ||
+        !redis.get(RedisKeys.poll_results(poll_id)).nil?
     end
   end
 
@@ -65,20 +67,44 @@ class VotingAPI < Sinatra::Base
     status 204
   end
 
-  get '/poll' do
+  get '/polls' do
     content_type :json
 
-    candidates = redis.smembers(RedisKeys.poll_current_candidates)
+    poll_ids = redis.smembers(RedisKeys.polls_active)
+    polls = poll_ids.map do |poll_id|
+      candidates = redis.smembers(RedisKeys.poll_current_candidates(poll_id))
+      candidate_names = candidates.to_h do |candidate_id|
+        [candidate_id, redis.hget(RedisKeys.poll_current_candidate_names(poll_id), candidate_id)]
+      end
+
+      {
+        poll_id: poll_id,
+        status_value: redis.get(RedisKeys.poll_current_status(poll_id)),
+        started_at: redis.get(RedisKeys.poll_current_started_at(poll_id)),
+        candidates: candidate_names
+      }
+    end
+
+    { status: 'success', count: polls.size, polls: polls }.to_json
+  end
+
+  get '/poll/:poll_id' do
+    content_type :json
+
+    poll_id = params['poll_id']
+    halt 404, response_error('Poll not found') unless poll_active_or_known?(poll_id)
+
+    candidates = redis.smembers(RedisKeys.poll_current_candidates(poll_id))
     candidate_names = candidates.to_h do |candidate_id|
-      [candidate_id, redis.hget(RedisKeys.poll_current_candidate_names, candidate_id)]
+      [candidate_id, redis.hget(RedisKeys.poll_current_candidate_names(poll_id), candidate_id)]
     end
 
     {
       status: 'success',
-      poll_id: redis.get(RedisKeys.poll_current_poll_id),
-      status_value: redis.get(RedisKeys.poll_current_status),
-      started_at: redis.get(RedisKeys.poll_current_started_at),
-      ended_at: redis.get(RedisKeys.poll_current_ended_at),
+      poll_id: redis.get(RedisKeys.poll_current_poll_id(poll_id)),
+      status_value: redis.get(RedisKeys.poll_current_status(poll_id)),
+      started_at: redis.get(RedisKeys.poll_current_started_at(poll_id)),
+      ended_at: redis.get(RedisKeys.poll_current_ended_at(poll_id)),
       candidates: candidate_names
     }.to_json
   end
@@ -88,10 +114,12 @@ class VotingAPI < Sinatra::Base
 
     request_payload = parsed_request_body
     candidate_id = request_payload['candidate_id']
+    poll_id = request_payload['poll_id']
     challenge_token = request_payload['challenge_token']
     nonce = request_payload['nonce']
 
-    result = vote_validator.call(candidate_id: candidate_id, challenge_token: challenge_token, nonce: nonce)
+    result = vote_validator.call(candidate_id: candidate_id, challenge_token: challenge_token, nonce: nonce,
+                                 poll_id: poll_id)
 
     unless result.valid?
       APP_LOGGER.warn("vote rejected: #{result.message} (candidate_id=#{candidate_id})")
@@ -129,13 +157,14 @@ class VotingAPI < Sinatra::Base
   get '/votes/summary/:poll_id' do
     content_type :json
 
-    halt 404, response_error('Poll not found') unless params['poll_id'] == poll_id
+    poll_id = params['poll_id']
+    halt 404, response_error('Poll not found') unless poll_active_or_known?(poll_id)
 
-    candidates = redis.smembers(RedisKeys.poll_current_candidates)
+    candidates = redis.smembers(RedisKeys.poll_current_candidates(poll_id))
     summary = candidates.each_with_object({}) do |candidate_id, result|
       total_votes = redis.get(RedisKeys.votes_total(poll_id, candidate_id)).to_i
       result[candidate_id] = {
-        name: redis.hget(RedisKeys.poll_current_candidate_names, candidate_id),
+        name: redis.hget(RedisKeys.poll_current_candidate_names(poll_id), candidate_id),
         total_votes: total_votes
       }
     end
@@ -147,7 +176,7 @@ class VotingAPI < Sinatra::Base
         data[hour] = redis.get(key).to_i
       end
       result[candidate_id] = {
-        name: redis.hget(RedisKeys.poll_current_candidate_names, candidate_id),
+        name: redis.hget(RedisKeys.poll_current_candidate_names(poll_id), candidate_id),
         hourly_votes: hourly_data
       }
     end

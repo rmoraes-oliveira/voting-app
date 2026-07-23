@@ -31,11 +31,11 @@ class AdminAPI < Sinatra::Base
   post '/poll/start' do
     content_type :json
 
-    halt 400, response_error('Poll is already active') if redis.get(RedisKeys.poll_current_status) == 'active'
-
     payload = parsed_request_body
     candidates = payload['candidates']
     poll_id = payload['poll_id'] || SecureRandom.uuid
+
+    halt 400, response_error('Poll is already active') if redis.get(RedisKeys.poll_current_status(poll_id)) == 'active'
 
     halt 400, response_error('Candidates are required') if candidates.nil? || candidates.empty?
     unless candidates.is_a?(Array) && candidates.all?(Hash)
@@ -50,14 +50,15 @@ class AdminAPI < Sinatra::Base
     candidate_ids = candidates.map { |c| c['id'] }
 
     redis.multi do |tx|
-      tx.del(RedisKeys.poll_current_candidates)
-      tx.sadd(RedisKeys.poll_current_candidates, candidate_ids)
-      tx.del(RedisKeys.poll_current_candidate_names)
-      candidates.each { |c| tx.hset(RedisKeys.poll_current_candidate_names, c['id'], c['name']) }
-      tx.set(RedisKeys.poll_current_poll_id, poll_id)
-      tx.set(RedisKeys.poll_current_status, 'active')
-      tx.set(RedisKeys.poll_current_started_at, Time.now.to_i)
-      tx.del(RedisKeys.poll_current_ended_at)
+      tx.del(RedisKeys.poll_current_candidates(poll_id))
+      tx.sadd(RedisKeys.poll_current_candidates(poll_id), candidate_ids)
+      tx.del(RedisKeys.poll_current_candidate_names(poll_id))
+      candidates.each { |c| tx.hset(RedisKeys.poll_current_candidate_names(poll_id), c['id'], c['name']) }
+      tx.set(RedisKeys.poll_current_poll_id(poll_id), poll_id)
+      tx.set(RedisKeys.poll_current_status(poll_id), 'active')
+      tx.set(RedisKeys.poll_current_started_at(poll_id), Time.now.to_i)
+      tx.del(RedisKeys.poll_current_ended_at(poll_id))
+      tx.sadd(RedisKeys.polls_active, poll_id)
 
       candidate_ids.each { |id| tx.set(RedisKeys.votes_total(poll_id, id), 0) }
     end
@@ -65,40 +66,42 @@ class AdminAPI < Sinatra::Base
     { status: 'success', message: 'Poll started', poll_id: poll_id }.to_json
   end
 
-  post '/poll/stop' do
+  post '/poll/stop/:poll_id' do
     content_type :json
 
-    halt 400, response_error('Poll is not active') if redis.get(RedisKeys.poll_current_status) != 'active'
+    poll_id = params['poll_id']
+
+    halt 400, response_error('Poll is not active') if redis.get(RedisKeys.poll_current_status(poll_id)) != 'active'
 
     lag = KafkaLag.total_lag(Settings::KAFKA_TOPIC)
     if lag.positive?
       halt 423, { status: 'error', message: 'Votes still being processed, try again shortly', lag: lag }.to_json
     end
 
-    poll_id = redis.get(RedisKeys.poll_current_poll_id)
-    candidate_ids = redis.smembers(RedisKeys.poll_current_candidates)
+    candidate_ids = redis.smembers(RedisKeys.poll_current_candidates(poll_id))
     ended_at = Time.now.to_i
 
     results = candidate_ids.to_h do |id|
       [id, {
-        name: redis.hget(RedisKeys.poll_current_candidate_names, id),
+        name: redis.hget(RedisKeys.poll_current_candidate_names(poll_id), id),
         total_votes: redis.get(RedisKeys.votes_total(poll_id, id)).to_i
       }]
     end
 
     snapshot = {
       poll_id: poll_id,
-      started_at: redis.get(RedisKeys.poll_current_started_at).to_i,
+      started_at: redis.get(RedisKeys.poll_current_started_at(poll_id)).to_i,
       ended_at: ended_at,
       results: results
     }
 
     redis.multi do |tx|
-      tx.set(RedisKeys.poll_current_status, 'stopped')
-      tx.set(RedisKeys.poll_current_ended_at, ended_at)
+      tx.set(RedisKeys.poll_current_status(poll_id), 'stopped')
+      tx.set(RedisKeys.poll_current_ended_at(poll_id), ended_at)
 
       tx.set(RedisKeys.poll_results(poll_id), snapshot.to_json)
       tx.zadd(RedisKeys.poll_results_index, ended_at, poll_id)
+      tx.srem(RedisKeys.polls_active, poll_id)
     end
 
     { status: 'success', message: 'Poll stopped' }.merge(snapshot).to_json
@@ -107,7 +110,8 @@ class AdminAPI < Sinatra::Base
   get '/poll/results/:poll_id' do
     content_type :json
 
-    snapshot = redis.get(RedisKeys.poll_results(params['poll_id']))
+    poll_id = params['poll_id']
+    snapshot = redis.get(RedisKeys.poll_results(poll_id))
     halt 404, response_error('Results not found for this poll_id') unless snapshot
 
     snapshot
@@ -117,8 +121,9 @@ class AdminAPI < Sinatra::Base
     content_type :json
 
     poll_ids = redis.zrevrange(RedisKeys.poll_results_index, 0, -1)
-    history = poll_ids.filter_map { |id| redis.get(RedisKeys.poll_results(id)) }
+    results = poll_ids.filter_map { |poll_id| redis.get(RedisKeys.poll_results(poll_id)) }
+                      .map { |snapshot| JSON.parse(snapshot) }
 
-    { status: 'success', count: history.size, results: history.map { |json| JSON.parse(json) } }.to_json
+    { status: 'success', count: results.size, results: results }.to_json
   end
 end

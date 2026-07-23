@@ -115,6 +115,18 @@ docker compose down        # mantém os volumes (dados do Redis, Grafana)
 docker compose down -v     # remove tudo, incluindo dados persistidos
 ```
 
+### Desenvolvimento (hot reload sem rebuild)
+
+Os serviços `api` e `consumer` montam `./api` como volume dentro do container. Isso significa que alterações no código Ruby não exigem `docker compose build` — basta reiniciar o(s) processo(s) para carregar o novo código:
+
+```bash
+docker compose restart api consumer
+```
+
+O `frontend` monta `./frontend/index.html` como volume — como é servido estaticamente pelo nginx, basta salvar o arquivo e dar refresh no navegador (sem restart, sem rebuild).
+
+O rebuild da imagem (`docker compose up -d --build`) só é necessário ao alterar `Gemfile`/`Gemfile.lock` ou os `Dockerfile`s.
+
 ## Documentação das APIs
 
 ### Voting API (`http://localhost:9292`)
@@ -126,11 +138,34 @@ Healthcheck da aplicação.
 curl http://localhost:9292/health
 ```
 
-#### `GET /poll`
-Retorna os dados do poll atual: status, candidatos e horários de início/fim. Usado pelo frontend para montar a lista de opções de voto.
+#### `GET /polls`
+Lista todos os polls ativos no momento (pode haver mais de um simultaneamente). Usado pelo frontend para exibir a tela de escolha de votação.
 
 ```bash
-curl http://localhost:9292/poll
+curl http://localhost:9292/polls
+```
+
+Exemplo de resposta:
+```json
+{
+  "status": "success",
+  "count": 1,
+  "polls": [
+    {
+      "poll_id": "abc123",
+      "status_value": "active",
+      "started_at": "1753200000",
+      "candidates": { "a": "Alice", "b": "Bob" }
+    }
+  ]
+}
+```
+
+#### `GET /poll/:poll_id`
+Retorna os dados de um poll específico: status, candidatos e horários de início/fim. Usado pelo frontend para montar a lista de opções de voto depois que o usuário escolhe uma votação em `GET /polls`. Retorna `404` se o `poll_id` não existir (nem ativo, nem com resultado salvo).
+
+```bash
+curl http://localhost:9292/poll/<poll_id>
 ```
 
 #### `GET /votes/challenge`
@@ -156,7 +191,7 @@ Respostas:
 - `503` — falha ao publicar no Kafka
 
 #### `GET /votes/summary/:poll_id`
-Retorna o total geral de votos, o total por candidato e o total de votos por hora do poll atual. O `:poll_id` na URL deve ser igual ao poll ativo no momento, senão retorna `404`.
+Retorna o total geral de votos, o total por candidato e o total de votos por hora do poll informado. Aceita qualquer `poll_id` ativo ou já encerrado (com snapshot salvo); retorna `404` se o `poll_id` for desconhecido.
 
 ```bash
 curl http://localhost:9292/votes/summary/<poll_id>
@@ -191,7 +226,7 @@ curl http://localhost:9292/metrics
 Todas as rotas exigem o header `X-Api-Key` com o valor de `ADMIN_API_KEY` (default: `dev-secret-key`).
 
 #### `POST /admin/poll/start`
-Cria e ativa um novo poll. Falha se já houver um poll ativo.
+Cria e ativa um novo poll. Vários polls podem estar ativos ao mesmo tempo, desde que tenham `poll_id` diferentes — falha apenas se o `poll_id` informado já estiver ativo.
 
 ```bash
 curl -X POST http://localhost:9292/admin/poll/start \
@@ -209,11 +244,11 @@ Campos:
 - `candidates` (obrigatório): lista de objetos `{id, name}`
 - `poll_id` (opcional): se omitido, um UUID é gerado
 
-#### `POST /admin/poll/stop`
-Encerra o poll ativo e grava um snapshot imutável do resultado (candidatos, votos totais e por hora). Falha com `423` se ainda houver lag de mensagens não processadas no Kafka (evita encerrar antes de contabilizar votos em trânsito).
+#### `POST /admin/poll/stop/:poll_id`
+Encerra o poll informado e grava um snapshot imutável do resultado (candidatos, votos totais e por hora). Falha com `423` se ainda houver lag de mensagens não processadas no Kafka (evita encerrar antes de contabilizar votos em trânsito).
 
 ```bash
-curl -X POST http://localhost:9292/admin/poll/stop \
+curl -X POST http://localhost:9292/admin/poll/stop/<poll_id> \
   -H "X-Api-Key: dev-secret-key"
 ```
 
@@ -277,10 +312,11 @@ Nível de log configurável via `LOG_LEVEL` (default `INFO`).
 # sobe a API com o proof-of-work desativado
 SKIP_PROOF_OF_WORK=true docker compose up -d --build api
 
-CANDIDATE=$(docker exec redis redis-cli smembers poll:current:candidates | head -1)
+POLL_ID=<poll_id>
+CANDIDATE=$(docker exec redis redis-cli smembers "poll:current:candidates:$POLL_ID" | head -1)
 docker compose run --rm hey -n 10000 -c 100 -m POST \
   -H "Content-Type: application/json" \
-  -d "{\"candidate_id\":\"$CANDIDATE\"}" \
+  -d "{\"candidate_id\":\"$CANDIDATE\",\"poll_id\":\"$POLL_ID\"}" \
   http://api:9292/votes
 
 # depois do teste, volta ao normal (proof-of-work exigido)
@@ -314,7 +350,7 @@ O pipeline (`.github/workflows/ci.yml`) roda a cada push/PR na branch `main`, em
 
 **1. `test`** — testes automatizados da API, sem precisar subir a stack Docker:
    - `bundle exec rubocop` (lint)
-   - `bundle exec rspec` (57 exemplos: request specs, consumer, reconciler, cálculo de lag — usa `MockRedis`, não depende de infraestrutura externa)
+   - `bundle exec rspec` (62 exemplos: request specs, consumer, reconciler, cálculo de lag — usa `MockRedis`, não depende de infraestrutura externa)
 
 **2. `build-and-test`** (roda só se `test` passar) — valida a stack de ponta a ponta:
    1. **Build** das imagens (`api`, `consumer`, `frontend`)
